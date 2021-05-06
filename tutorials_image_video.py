@@ -1,4 +1,4 @@
-# open-cv (cv2) learning file
+# open-cv (cv2) learning file number 1
 # reference: opencv-python-tutorials (readthedocs.io, py tutorials)
 
 # TODO: Create directory for tutorial resources (i.e images, videos) --> res
