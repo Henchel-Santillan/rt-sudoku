@@ -1,3 +1,6 @@
+# MODULE-INFO: Backtracking N X N sudoku solver algorithm. Works with a 2-dim list representation of the board.
+# Sudoku board dimensions are standard 9 X 9. The board arg is complete + solvable or incomplete + unsolvable
+
 def empty(board):
     for row in range(len(board)):
         for col in range(len(board[0])):
