@@ -77,9 +77,15 @@ image1_background = cv2.bitwise_and(roi, roi, mask=mask_inverse)
 # Take only region of superimposing image needed
 image2_foreground = cv2.bitwise_and(image2, image2, mask=m_mask)
 
+# Set the left corner to the addition of the superimposing area + region of sp img
 dst = cv2.add(image1_background, image2_foreground)
 image1[0:rows, 0:columns] = dst
 
+# Show and release
 cv2.imshow('Bitwise ImOps', image1)
 cv2.waitKey(0)
 cv2.destroyAllWindows()
+
+# (6) Thresholding
+
+# (7) Blurring
