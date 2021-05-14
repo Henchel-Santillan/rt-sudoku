@@ -86,6 +86,3 @@ cv2.imshow('Bitwise ImOps', image1)
 cv2.waitKey(0)
 cv2.destroyAllWindows()
 
-# (6) Thresholding
-
-# (7) Blurring
