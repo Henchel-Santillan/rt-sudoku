@@ -42,7 +42,7 @@ cv2.destroyAllWindows()
 capture = cv2.VideoCapture(0)       # init VideoCapture obj; number specifies which camera
 
 if not capture.isOpened():
-    capture.open()
+    capture.open(0)
 
 while True:
     has_return, frame = capture.read()  # flag for return, with frame returned
