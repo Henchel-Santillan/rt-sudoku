@@ -1,37 +1,10 @@
 import cv2
 import numpy as np
 
-'''
-KERNEL_SIZE = 9
-CONTOUR_MAX = 4  # 4 for 4 sides
-CONTOUR_AREA_MIN = 10000
-
-
-def preprocess(img):
-    # N.B. img arg is in greyscale
-    # Gaussian Blur + Adaptive Thresholding
-    improc = cv2.GaussianBlur(img.copy(), (KERNEL_SIZE, KERNEL_SIZE), 0)
-    improc = cv2.adaptiveThreshold(improc, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
-
-    # Color inversion and dilation to remove noise
-    improc = cv2.bitwise_not(improc, improc)
-    kernel = np.array([[0., 1., 0.], [1., 1., 1.], [0., 1., 0.]])
-    improc = cv2.dilate(improc, kernel)
-    return improc
-
-
-def find_contours(thresh):
-    count = 0
-    max_area = -1
-    max_contour = None
-
-    height, width, _ = thresh.shape
-
-    for y in range(height):
-'''
 
 KERNEL_SIZE = (5, 5)
-POLY_APPROX_COEFFICIENT = 0.02
+POLY_APPROX_COEFFICIENT = 0.015
+
 
 def preprocess(image):
     """
@@ -46,13 +19,8 @@ def preprocess(image):
     blur = cv2.GaussianBlur(gray, KERNEL_SIZE, 0)
     threshold = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 11, 7)
 
-    threshold = cv2.bitwise_not(threshold, threshold)
     return threshold
     # cv2.Canny(threshold, 100, 200)
-
-
-def detect_grid(image_p):
-    pass
 
 
 def order_corners(corners):
@@ -71,46 +39,48 @@ def perspective_transform(image, corners):
     top_l, top_r, bot_r, bot_l = ordered    # 4-tuple unpacking
 
     # width of new image is the maximum distance between bot_l and bot_r or top_l and top_r
-    width_bot = np.sqrt(((bot_r[0] - bot_l[0]) ** 2) + ((bot_r[1] - bot_l[1]) ** 2))
-    width_top = np.sqrt(((top_r[0] - top_l[0]) ** 2) + ((top_r[1] - top_l[1]) ** 2))
+    width_bot = np.sqrt((bot_r[0] - bot_l[0]) ** 2 + (bot_r[1] - bot_l[1]) ** 2)
+    width_top = np.sqrt((top_r[0] - top_l[0]) ** 2 + (top_r[1] - top_l[1]) ** 2)
     width = max(int(width_bot), int(width_top))
 
     # repeat the process for the new image height
-    height_l = np.sqrt(((top_r[0] - bot_r[0]) ** 2) + ((top_r[1] - bot_r[1]) ** 2))
-    height_r = np.sqrt(((top_l[0] - bot_l[0]) ** 2) + ((top_l[1] - bot_l[1]) ** 2))
+    height_l = np.sqrt((top_r[0] - bot_r[0]) ** 2 + (top_r[1] - bot_r[1]) ** 2)
+    height_r = np.sqrt((top_l[0] - bot_l[0]) ** 2 + (top_l[1] - bot_l[1]) ** 2)
     height = max(int(height_l), int(height_r))
 
     # construct an np array with top-down view in order
+    dims = np.array([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]], dtype="float32")
     ordered = np.array(ordered, dtype="float32")
-    matrix = cv2.getPerspectiveTransform(ordered, np.array([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]]))
+    matrix = cv2.getPerspectiveTransform(ordered, dims)
+
     return cv2.warpPerspective(image, matrix, (width, height))
 
 
-def warp_with_contours(image_p):
-    contours = cv2.findContours(image_p, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    contours = contours[0] if len(contours) == 2 else contours[1]
+def find_contours(src, image_p):
+    kernel = np.ones((3, 3), dtype="uint8")
+
+    kernel[0][0] = 0
+    kernel[0][2] = 0
+    kernel[2][0] = 0
+    kernel[2][2] = 0
+
+    dilated_image = cv2.dilate(image_p, kernel)
+    contours, _ = cv2.findContours(dilated_image.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     contours = sorted(contours, key=cv2.contourArea, reverse=True)
 
-    for contour in contours:
-        perimeter = cv2.arcLength(contour, True)
-        poly_approx = cv2.approxPolyDP(contour, POLY_APPROX_COEFFICIENT * perimeter, True)
-        return perspective_transform(image_p, poly_approx)
+    max_p, max_c = 0, None
+
+    for c in contours:
+        p = cv2.arcLength(c, True)
+        poly_approx = cv2.approxPolyDP(c, POLY_APPROX_COEFFICIENT * p, True)
+        if len(poly_approx) == 4 and p > max_p:
+            max_p = p
+            max_c = poly_approx
+
+    return perspective_transform(src, max_c)
 
 
-def find_lines(image):
-    """
-    Hough transform is used to detect the lines on the grid
-    """
-    pass
-
-
-#sample = cv2.imread(r'C:\Users\hench\PycharmProjects\rt-sudoku\res\sudoku_grid.jpg')
-#cv2.imshow("Window", preprocess(cv2.imread(r'C:\Users\hench\PycharmProjects\rt-sudoku\res\sudoku_grid.jpg')))
-
-
-processed = preprocess(cv2.imread(r'C:\Users\hench\PycharmProjects\rt-sudoku\res\sudoku_grid.jpg'))
-warped = warp_with_contours(processed)
-cv2.imshow("Window", warped)
+sample = cv2.imread(r'C:\Users\hench\PycharmProjects\rt-sudoku\res\sudoku_grid.jpg')
+cv2.imshow("", find_contours(sample, preprocess(sample)))
 cv2.waitKey(0)
-
 
