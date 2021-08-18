@@ -4,31 +4,26 @@ import numpy as np
 
 KERNEL_SIZE = (5, 5)
 POLY_APPROX_COEFFICIENT = 0.015
+ARB_RHO_THRESH = 15
+ARB_THETA_THRESH = 0.1
 
 
 def preprocess(image):
     """
-    Preprocessing the image involves
-    1. Segmentation of the image via thresholding
-    2. Detecting the "blob" of the puzzle by assuming it to be the largest in the image sample
-    3. Applying hough transform to locate the four corners of the puzzle
-    4. Remapping the sample image to a resized image that fits corner to corner (downsampling)
+    Image preprocessing: greyscale, low-pass filter via Gaussian blur, adaptive thresholding
     """
 
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blur = cv2.GaussianBlur(gray, KERNEL_SIZE, 0)
     threshold = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 11, 7)
-
     return threshold
 
 
 def order_corners(corners):
     """
-    N.B.: Index 0 = top-right
-                1 = top-left
-                2 = bottom-left
-                3 = bottom-right
+    Orders the corners in clockwise order beginning at the top right
     """
+
     corners = [(corner[0][0], corner[0][1]) for corner in corners]
     return corners[1], corners[0], corners[3], corners[2]
 
@@ -48,15 +43,15 @@ def perspective_transform(image, corners):
     height = max(int(height_l), int(height_r))
 
     # construct an np array with top-down view in order
-    dims = np.array([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]], dtype="float32")
-    ordered = np.array(ordered, dtype="float32")
+    dims = np.array([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]], np.float32)
+    ordered = np.array(ordered, np.float32)
     matrix = cv2.getPerspectiveTransform(ordered, dims)
 
     return cv2.warpPerspective(image, matrix, (width, height))
 
 
 def find_contours(src, image_p):
-    kernel = np.ones((3, 3), dtype="uint8")
+    kernel = np.ones((3, 3), np.uint8)
 
     kernel[0][0] = 0
     kernel[0][2] = 0
@@ -80,11 +75,39 @@ def find_contours(src, image_p):
 
 
 def find_lines(image_t):
+    """
+    Uses the standard Hough transform + filtering to detect the grid lines of the puzzle
+    """
+
     gray = cv2.cvtColor(image_t, cv2.COLOR_BGR2GRAY)
     edges = cv2.Canny(gray, 50, 150, apertureSize=3)
+    lines = cv2.HoughLines(edges, 1, np.pi / 180, 128)
 
-    lines = cv2.HoughLines(edges, 1, np.pi / 180, 125)
-    for line in lines:
+    similar = [[] for x in range(len(lines))]
+    for i in range(len(lines)):
+        for j in range(len(lines)):
+            if (i != j and
+                    abs(lines[i][0][0] - lines[j][0][0]) < ARB_RHO_THRESH and
+                    abs(lines[i][0][1] - lines[j][0][1]) < ARB_THETA_THRESH):
+                similar[i].append(j)
+
+    keys = [x for x in range(len(lines))]
+    keys.sort(key=lambda x: len(similar[x]))
+
+    flags = [True] * len(lines)
+    for i in range(len(lines) - 1):
+        if not flags[keys[i]]:
+            continue
+
+        for j in range(i + 1, len(lines)):
+            if (flags[keys[j]] and
+                    abs(lines[keys[i]][0][0] - lines[keys[j]][0][0]) < ARB_RHO_THRESH and
+                    abs(lines[keys[i]][0][1] - lines[keys[j]][0][1]) < ARB_THETA_THRESH):
+                flags[keys[j]] = False
+
+    filtered_lines = [lines[i] for i in range(len(lines)) if flags[i]]
+
+    for line in filtered_lines:
         rho, theta = line[0]
         h, v = np.cos(theta), np.sin(theta)
         h_rho, v_rho = h * rho, v * rho
