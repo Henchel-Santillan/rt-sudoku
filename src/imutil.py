@@ -20,7 +20,6 @@ def preprocess(image):
     threshold = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 11, 7)
 
     return threshold
-    # cv2.Canny(threshold, 100, 200)
 
 
 def order_corners(corners):
@@ -80,7 +79,25 @@ def find_contours(src, image_p):
     return perspective_transform(src, max_c)
 
 
+def find_lines(image_t):
+    gray = cv2.cvtColor(image_t, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 50, 150, apertureSize=3)
+
+    lines = cv2.HoughLines(edges, 1, np.pi / 180, 125)
+    for line in lines:
+        rho, theta = line[0]
+        h, v = np.cos(theta), np.sin(theta)
+        h_rho, v_rho = h * rho, v * rho
+        x1, y1 = int(h_rho + 1000 * (-v)), int(v_rho + 1000 * h)
+        x2, y2 = int(h_rho - 1000 * (-v)), int(v_rho - 1000 * h)
+
+        cv2.line(image_t, (x1, y1), (x2, y2), (0, 0, 255), 2)
+
+    return image_t
+
+
 sample = cv2.imread(r'C:\Users\hench\PycharmProjects\rt-sudoku\res\sudoku_grid.jpg')
-cv2.imshow("", find_contours(sample, preprocess(sample)))
+transformed = find_contours(sample, preprocess(sample))
+cv2.imshow("", find_lines(transformed))
 cv2.waitKey(0)
 
