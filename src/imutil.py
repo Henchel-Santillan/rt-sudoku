@@ -1,12 +1,16 @@
+import os
+import shutil
+
 import cv2
 import numpy as np
-import operator
+
 
 KERNEL_SIZE = (5, 5)
 POLY_APPROX_COEFFICIENT = 0.015
 ARB_RHO_THRESH = 15
 ARB_THETA_THRESH = 0.1
 DIM = 9
+PATH_TO_TEMP = r"C:\Users\hench\PycharmProjects\rt-sudoku\temp"
 
 
 def preprocess(image):
@@ -76,7 +80,9 @@ def find_contours(src, image_p):
             max_p = p
             max_c = poly_approx
 
-    return perspective_transform(src, max_c)
+    if max_c is not None:
+        return perspective_transform(src, max_c)
+    return src
 
 
 def find_lines(image_t):
@@ -100,160 +106,73 @@ def find_lines(image_t):
     return image_t
 
 
-def detect_cells(image_t):
-    canny = cv2.Canny(cv2.cvtColor(image_t, cv2.COLOR_BGR2GRAY), 50, 110)
-    dilated = cv2.dilate(canny, np.ones((3, 3), np.uint8), iterations=1)
+def find_grid(image_p):
+    image = cv2.bitwise_not(image_p)
+    cs, _ = cv2.findContours(image, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    c_max = max(cs, key=cv2.contourArea)
 
-    kernel_h = np.ones((1, 20), np.uint8)
-    morph_h = cv2.morphologyEx(dilated, cv2.MORPH_OPEN, kernel_h)
+    x, y, width, height = cv2.boundingRect(c_max)
+    grid = image[y: y + height, x: x + width]
+    grid = cv2.resize(grid, (min(grid.shape), min(grid.shape)))
 
-    kernel_v = np.ones((20, 1), np.uint8)
-    morph_v = cv2.morphologyEx(dilated, cv2.MORPH_OPEN, kernel_v)
+    cs2, _ = cv2.findContours(grid, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    cs2 = sorted(cs2, key=cv2.contourArea, reverse=True)
 
-    morph = morph_h | morph_v
-    return cv2.dilate(morph, np.ones((3, 3), np.uint8), iterations=1)
+    maximum = None
+    poly_approx = None
+
+    for c in cs2[:min(5, len(cs2))]:
+        perimeter = cv2.arcLength(c, True)
+        approx = cv2.approxPolyDP(c, POLY_APPROX_COEFFICIENT * perimeter, True)
+        if len(approx) == 4:
+            maximum = c
+            poly_approx = approx
+
+    if maximum is not None:
+        grid = perspective_transform(grid, poly_approx)
+
+    return grid
 
 
 def extract_cells(image_t):
-    thresh = preprocess(image_t)
-    cs_thresh, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    cs_thresh = cs_thresh[0] if len(cs_thresh) == 2 else cs_thresh[1]
+    # Clear temp folder first
+    for f in os.listdir(PATH_TO_TEMP):
+        os.remove(os.path.join(PATH_TO_TEMP, f))
 
-    for c in cs_thresh:
-        if cv2.contourArea(c) < 1000:
-            cv2.drawContours(thresh, [c], -1, (0, 0, 0), -1)
+    '''
+    for fname in os.listdir(PATH_TO_TEMP):
+        try:
+            if os.path.isfile(fname) or os.path.islink(fname):
+                os.unlink(fname)
+            elif os.path.isdir(fname):
+                shutil.rmtree(fname)
+        except Exception as e:
+            print("Failed to remove file %s. See below: %s" % (fname, e))
+    '''
 
-    cv2.imshow("", thresh)
-    cv2.waitKey(0)
+    image = image_t.copy()
+    width, height = image.shape
 
+    image = cv2.resize(image, (min(width, height), min(width, height)))
+    cell_dim = int(width / DIM)
 
-def snip_rect(image, rect):
-    return image[int(rect[0][1]): int(rect[1][1]), int(rect[0][0]): int(rect[1][0])]
-
-
-def scale_and_centre(image, size, margin=0, background=0):
-    height, width = image.shape[:2]
-
-    def pad_centre(length):
-        s1 = int((size - length) / 2)
-        return (s1, s1) if length % 2 == 0 else (s1, s1 + 1)
-
-    if height > width:
-        top = int(margin / 2)
-        bottom = top
-        r = (size - margin) / height
-        width, height = r * width, r * height
-        left, right = pad_centre(width)
-    else:
-        left = int(margin / 2)
-        right = left
-        r = (size - margin) / width
-        width, height = r * width, r * height
-        top, bottom = pad_centre(height)
-
-    image = cv2.resize(image, (width, height))
-    image = cv2.copyMakeBorder(image, top, bottom, left, right, cv2.BORDER_CONSTANT, None, background)
-    return cv2.resize(image, (size, size))
-
-
-def deduce_grid(image):
-    squares = []
-    side = image.shape[:1][0] / DIM
-
-    for y in range(DIM):
-        for x in range(DIM):
-            p1, p2 = (x * side, y * side), ((x + 1) * side, (y + 1) * side)
-            squares.append((p1, p2))
-    return squares
-
-
-def find_largest_blob(image, top_left=None, bottom_right=None):
-    copy_image = image.copy()
-    height, width = copy_image.shape[:2]
-
-    max_area = 0
-    seed = (None, None)
-
-    if top_left is None:
-        top_left = [0, 0]
-        
-    if bottom_right is None:
-        bottom_right = [width, height]
-
-    for x in range(top_left[0], bottom_right[0]):
-        for y in range(top_left[1], bottom_right[1]):
-            if copy_image.item(y, x) == 255 and x < width and y < height:
-                area = cv2.floodFill(copy_image, None, (x, y), 64)[0]
-                if area > max_area:
-                    max_area = area
-                    seed = (x, y)
-
-    for x in range(width):
-        for y in range(height):
-            if copy_image.item(y, x) == 255 and x < width and y < height:
-                cv2.floodFill(copy_image, None, (x, y), 64)
-
-    mask = np.zeros((height + 2, width + 2), np.uint8)
-
-    if all([c is not None for c in seed]):
-        cv2.floodFill(copy_image, mask, seed, 255)
-
-    top, bottom = height, 0
-    left, right = width, 0
-
-    for x in range(width):
-        for y in range(height):
-            if copy_image.item(y, x) == 64:
-                cv2.floodFill(image, mask, (x, y), 0)
-
-            if copy_image.item(y, x) == 255:
-                if y < top: top = y
-                if y > bottom: bottom = y
-                if x < left: left = x
-                if x > right: right = x
-
-    return image, np.array([[left, top], [right, bottom]], dtype=np.float32), seed
-
-
-def extract_digit(image, rect, size):
-    digit = snip_rect(image, rect)
-    height, width = digit.shape[:2]
-    margin = int(np.mean([height, width]) / 2.5)
-
-    _, bounding, seed = find_largest_blob(image, [margin, margin], [width - margin, height - margin])
-    digit = snip_rect(image, bounding)
-
-    width = bounding[1][0] - bounding[0][0]
-    height = bounding[1][1] - bounding[0][1]
-
-    if width > 0 and height > 0 and (width * height) > 100 and len(digit) > 0:
-        return scale_and_centre(digit, size, 4)
-    return np.zeros((size, size), np.uint8)
-
-
-def find_digits(image, squares, size):
-    digits = []
-    image = preprocess(image)
-    for s in squares:
-        digits.append(extract_digit(image, s, size))
-    return digits
-
-
-def fix_image(digits, color=255):
-    rows = []
-    border = [cv2.copyMakeBorder(image.copy(), 1, 1, 1, 1, cv2.BORDER_CONSTANT, None, color) for image in digits]
-    for x in range(DIM):
-        rows.append(np.concatenate(border[x * DIM: ((x + 1) * DIM)], axis=1))
-    return np.concatenate(rows)
+    if cell_dim != 0:
+        i, j = 0, 0
+        for r in range(0, width - cell_dim, cell_dim):
+            j = 0
+            for c in range(0, height - cell_dim, cell_dim):
+                f = DIM + 1
+                cell = image[r + f: r + cell_dim - f, c + f: c + cell_dim - f]
+                fname = "cell" + str(i) + str(j) + ".png"
+                cv2.imwrite(os.path.join(PATH_TO_TEMP, fname), cell)
+                j += 1
+            i += 1
 
 
 sample = cv2.imread(r'C:\Users\hench\PycharmProjects\rt-sudoku\res\sudoku_grid.jpg')
 transformed = find_contours(sample, preprocess(sample))
-digits_f = find_digits(transformed, deduce_grid(transformed), 28)
-resized = scale_and_centre(transformed, 28)
+# extract_cells(preprocess(transformed))
 
-#fixed = fix_image(digits_f)
-cv2.imshow("Fixed Image", resized)
+# cv2.imshow("", find_grid(preprocess(transformed)))
 cv2.waitKey(0)
 cv2.destroyAllWindows()
-
