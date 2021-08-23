@@ -1,15 +1,19 @@
-import numpy as np
+import os
+
 import pytesseract
-from PIL import Image
 from imutil import DIM
 
 
-def image_to_array(pil_images):
-    """
-    Reads in an array of PIL images, recognizes the digits in each image, and writes to a returned 2D list.
-    """
-    arr = np.zeros((DIM, DIM), np.uint32)
-    for image in pil_images:
-        digit_str = (pytesseract.image_to_string(image, lang="eng",
-                                                 config="--psm 10 --oem 3 -c tessedit_char_whitelist=0123456789"))
+def image_to_array(path):
+    digits = [0] * (DIM ** 2)
+    i = 0
 
+    for image in os.listdir(path):
+        fname = os.fsdecode(image)
+        if fname.endswith(".png"):
+            digit_str = (pytesseract.image_to_string(image, lang="eng",
+                                                     config="--psm 10 --oem 3 -c tessedit_char_whitelist=0123456789"))
+            if digit_str != "" and digit_str.isdecimal():
+                digits[i] = int(digit_str)
+
+    return digits

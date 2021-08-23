@@ -1,5 +1,4 @@
 import os
-import shutil
 
 import cv2
 import numpy as np
@@ -11,6 +10,11 @@ ARB_RHO_THRESH = 15
 ARB_THETA_THRESH = 0.1
 DIM = 9
 PATH_TO_TEMP = r"C:\Users\hench\PycharmProjects\rt-sudoku\temp"
+
+
+skewed = cv2.imread(r'C:\Users\hench\PycharmProjects\rt-sudoku\res\sudoku_skewed.jpg')
+sample = cv2.imread(r'C:\Users\hench\PycharmProjects\rt-sudoku\res\sudoku_grid.jpg')
+perfect = cv2.imread(r'C:\Users\hench\PycharmProjects\rt-sudoku\res\sudoku_perfect.png')
 
 
 def preprocess(image):
@@ -33,6 +37,22 @@ def order_corners(corners):
     return corners[1], corners[0], corners[3], corners[2]
 
 
+def order_corners2(points):
+    rect = np.zeros((4, 2), dtype="float32")
+
+    # Sum of (x, y) for each corner point: min = top-left, max = bottom-right
+    s = points.sum(axis=1)
+    rect[0] = points[np.argmin(s)]
+    rect[2] = points[np.argmax(s)]
+
+    # Difference of (x, y): min = top-right, max = bottom-left
+    d = np.diff(points, axis=1)
+    rect[1] = points[np.argmin(d)]
+    rect[3] = points[np.argmax(d)]
+
+    return rect
+
+
 def perspective_transform(image, corners):
     """
     Four-point transform, obtains a consistent order of the points and unpacks them individually
@@ -52,11 +72,45 @@ def perspective_transform(image, corners):
     height = max(int(height_l), int(height_r))
 
     # construct an np array with top-down view in order
-    dims = np.array([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]], np.float32)
+    dims = np.array([[0, 0],
+                     [width - 1, 0],
+                     [width - 1, height - 1],
+                     [0, height - 1]],
+                    np.float32)
+
     ordered = np.array(ordered, np.float32)
     matrix = cv2.getPerspectiveTransform(ordered, dims)
 
     return cv2.warpPerspective(image, matrix, (width, height))
+
+
+def skew_angle(image):
+    image_p = preprocess(image)
+    image_p = cv2.bitwise_not(image_p)
+    dilated = cv2.dilate(image_p, cv2.getStructuringElement(cv2.MORPH_RECT, (30, 5)))
+
+    cs, _ = cv2.findContours(dilated, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    cs = sorted(cs, key=cv2.contourArea, reverse=True)
+
+    min_rect = cv2.minAreaRect(cs[0])
+    angle = min_rect[-1]
+    if angle < -45:
+        angle = 90 + angle
+    return -1.0 * angle
+
+
+def rotate_image(image, angle: float):
+    image_c = image.copy()
+    h, w = image_c.shape[:2]
+    centre = (w // 2, h // 2)
+    matrix = cv2.getRotationMatrix2D(centre, angle, 1.0)
+    image_c = cv2.warpAffine(image_c, matrix, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+    return image_c
+
+
+def fix_image_skew(image):
+    angle = skew_angle(image)
+    return rotate_image(image, -1.0 * angle)
 
 
 def find_contours(src, image_p):
@@ -89,7 +143,6 @@ def find_lines(image_t):
     """
     Uses the standard Hough transform + filtering to detect the grid lines of the puzzle
     """
-
     gray = cv2.cvtColor(image_t, cv2.COLOR_BGR2GRAY)
     edges = cv2.Canny(gray, 50, 150, apertureSize=3)
     lines = cv2.HoughLines(edges, 1, np.pi / 180, 125)
@@ -101,78 +154,35 @@ def find_lines(image_t):
         x1, y1 = int(h_rho + 1000 * (-v)), int(v_rho + 1000 * h)
         x2, y2 = int(h_rho - 1000 * (-v)), int(v_rho - 1000 * h)
 
-        cv2.line(image_t, (x1, y1), (x2, y2), (0, 0, 255), 2)
+        cv2.line(image_t, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
     return image_t
 
 
-def find_grid(image_p):
-    image = cv2.bitwise_not(image_p)
-    cs, _ = cv2.findContours(image, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    c_max = max(cs, key=cv2.contourArea)
-
-    x, y, width, height = cv2.boundingRect(c_max)
-    grid = image[y: y + height, x: x + width]
-    grid = cv2.resize(grid, (min(grid.shape), min(grid.shape)))
-
-    cs2, _ = cv2.findContours(grid, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    cs2 = sorted(cs2, key=cv2.contourArea, reverse=True)
-
-    maximum = None
-    poly_approx = None
-
-    for c in cs2[:min(5, len(cs2))]:
-        perimeter = cv2.arcLength(c, True)
-        approx = cv2.approxPolyDP(c, POLY_APPROX_COEFFICIENT * perimeter, True)
-        if len(approx) == 4:
-            maximum = c
-            poly_approx = approx
-
-    if maximum is not None:
-        grid = perspective_transform(grid, poly_approx)
-
-    return grid
+def sharpen(image):
+    kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
+    return cv2.filter2D(image, -1, kernel)
 
 
-def extract_cells(image_t):
-    # Clear temp folder first
+def partition(image):
+    """
+    Manual partition algorithm. Should break image into N x N squares
+    """
     for f in os.listdir(PATH_TO_TEMP):
         os.remove(os.path.join(PATH_TO_TEMP, f))
 
-    '''
-    for fname in os.listdir(PATH_TO_TEMP):
-        try:
-            if os.path.isfile(fname) or os.path.islink(fname):
-                os.unlink(fname)
-            elif os.path.isdir(fname):
-                shutil.rmtree(fname)
-        except Exception as e:
-            print("Failed to remove file %s. See below: %s" % (fname, e))
-    '''
+    h, w = image.shape[:2]
+    resized = cv2.resize(image.copy(), (min(w, h), min(w, h)))
 
-    image = image_t.copy()
-    width, height = image.shape
-
-    image = cv2.resize(image, (min(width, height), min(width, height)))
-    cell_dim = int(width / DIM)
-
-    if cell_dim != 0:
-        i, j = 0, 0
-        for r in range(0, width - cell_dim, cell_dim):
-            j = 0
-            for c in range(0, height - cell_dim, cell_dim):
-                f = DIM + 1
-                cell = image[r + f: r + cell_dim - f, c + f: c + cell_dim - f]
-                fname = "cell" + str(i) + str(j) + ".png"
+    rdim = resized.shape[:2][0]
+    box_dim = int(rdim / DIM)
+    if box_dim != 0:
+        x, y = 1, 1
+        for r in range(0, rdim - box_dim, box_dim):
+            for c in range(0, rdim - box_dim, box_dim):
+                cell = resized[r: r + box_dim, c: c + box_dim]
+                fname = str(x) + str(y) + ".png"
                 cv2.imwrite(os.path.join(PATH_TO_TEMP, fname), cell)
-                j += 1
-            i += 1
-
-
-sample = cv2.imread(r'C:\Users\hench\PycharmProjects\rt-sudoku\res\sudoku_grid.jpg')
-transformed = find_contours(sample, preprocess(sample))
-# extract_cells(preprocess(transformed))
-
-# cv2.imshow("", find_grid(preprocess(transformed)))
-cv2.waitKey(0)
-cv2.destroyAllWindows()
+                y += 1
+            y = 0
+            x += 1

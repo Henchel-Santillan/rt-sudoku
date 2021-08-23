@@ -49,3 +49,11 @@ def solve(board):
             board[row][col] = 0
 
     return False
+
+
+def print_board(board):
+    for row in range(len(board)):
+        for col in range(len(board[row])):
+            token = board[row][col] if board[row][col] != 0 else "."
+            print(token, end="")
+        print()
