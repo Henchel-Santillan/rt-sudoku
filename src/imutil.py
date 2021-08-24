@@ -4,17 +4,11 @@ import cv2
 import numpy as np
 
 
-KERNEL_SIZE = (5, 5)
 POLY_APPROX_COEFFICIENT = 0.015
 ARB_RHO_THRESH = 15
 ARB_THETA_THRESH = 0.1
 DIM = 9
 PATH_TO_TEMP = r"C:\Users\hench\PycharmProjects\rt-sudoku\temp"
-
-
-skewed = cv2.imread(r'C:\Users\hench\PycharmProjects\rt-sudoku\res\sudoku_skewed.jpg')
-sample = cv2.imread(r'C:\Users\hench\PycharmProjects\rt-sudoku\res\sudoku_grid.jpg')
-perfect = cv2.imread(r'C:\Users\hench\PycharmProjects\rt-sudoku\res\sudoku_perfect.png')
 
 
 def preprocess(image):
@@ -23,7 +17,7 @@ def preprocess(image):
     """
 
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    blur = cv2.GaussianBlur(gray, KERNEL_SIZE, 0)
+    blur = cv2.GaussianBlur(gray, (5, 5), 0)
     threshold = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 11, 7)
     return threshold
 
@@ -180,7 +174,7 @@ def partition(image):
         x, y = 1, 1
         for r in range(0, rdim - box_dim, box_dim):
             for c in range(0, rdim - box_dim, box_dim):
-                cell = resized[r: r + box_dim, c: c + box_dim]
+                cell = resized[r + DIM: r + box_dim, c: c + box_dim]
                 fname = str(x) + str(y) + ".png"
                 cv2.imwrite(os.path.join(PATH_TO_TEMP, fname), cell)
                 y += 1
